@@ -1,0 +1,12 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Markwardt.AssetPipeline.Client.ViewModels"
+        x:Class="Markwardt.AssetPipeline.Client.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Asset Pipeline"
+        Width="1280" Height="800"
+        WindowStartupLocation="CenterScreen"
+        WindowDecorations="None"
+        Background="{DynamicResource EditorBackgroundBrush}">
+    <ContentControl Content="{Binding Shell}" />
+</Window>

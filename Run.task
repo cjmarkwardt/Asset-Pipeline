@@ -1,0 +1,2 @@
+script
+	run dotnet run --project Client

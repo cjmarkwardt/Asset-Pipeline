@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Markwardt.AssetPipeline.Client.ViewModels.Dialogs"
+        x:Class="Markwardt.AssetPipeline.Client.Views.Dialogs.TextInputDialogWindow"
+        x:DataType="vm:TextInputDialogViewModel"
+        Width="420" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="{Binding Title}"
+        Background="{DynamicResource EditorBackgroundBrush}">
+    <StackPanel Margin="16" Spacing="14">
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+        <TextBox Text="{Binding Value, Mode=TwoWay}" Name="ValueBox" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Cancel" Command="{Binding CancelCommand}" />
+            <Button Content="OK" Classes="accent" Command="{Binding ConfirmCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

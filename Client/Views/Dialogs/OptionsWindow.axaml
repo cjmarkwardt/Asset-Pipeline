@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Markwardt.AssetPipeline.Client.ViewModels.Dialogs"
+        x:Class="Markwardt.AssetPipeline.Client.Views.Dialogs.OptionsWindow"
+        x:DataType="vm:OptionsViewModel"
+        Width="440" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="Options"
+        Background="{DynamicResource EditorBackgroundBrush}">
+    <StackPanel Margin="18" Spacing="16">
+        <TextBlock Text="API Access" FontSize="16" FontWeight="Bold" />
+        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                   Text="Credentials used to generate images (scenario.com) and 3D models (meshy.ai). Text generation uses the local Claude Code CLI and needs no credentials here. The scenario.com generation model itself is set on the project's root node." />
+
+        <StackPanel Spacing="4">
+            <TextBlock Text="Scenario.com API Key" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+            <TextBox Text="{Binding ScenarioApiKey, Mode=TwoWay}" PasswordChar="•" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+            <TextBlock Text="Scenario.com API Secret" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+            <TextBox Text="{Binding ScenarioApiSecret, Mode=TwoWay}" PasswordChar="•" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+            <TextBlock Text="Meshy.ai API Key" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+            <TextBox Text="{Binding MeshyApiKey, Mode=TwoWay}" PasswordChar="•" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Cancel" Command="{Binding CancelCommand}" />
+            <Button Content="Save" Classes="accent" Command="{Binding SaveCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

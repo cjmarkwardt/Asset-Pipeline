@@ -1,0 +1,447 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Markwardt.AssetPipeline.Client.ViewModels"
+             xmlns:models="using:Markwardt.AssetPipeline.Client.Core.Models"
+             xmlns:infra="using:Markwardt.AssetPipeline.Client.Infrastructure"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             x:Class="Markwardt.AssetPipeline.Client.Views.ProjectTabView"
+             x:DataType="vm:ProjectTabViewModel"
+             Background="{DynamicResource EditorBackgroundBrush}">
+    <UserControl.Resources>
+        <infra:ProjectNodeIconConverter x:Key="ProjectNodeIconConverter" />
+        <infra:FilePathToBitmapConverter x:Key="FilePathToBitmapConverter" />
+
+        <!-- Right-click menu offered by every sidebar tree row, root node included. The Create* items bind
+             straight to the row's own node - a popup's content sits in its own visual tree, so an ancestor
+             lookup back up to the UserControl cannot reliably resolve from in here, and its DataContext is
+             only known at runtime (it varies per row, whichever kind of node that row's own node is), so
+             this whole menu opts out of compiled bindings to resolve against that DataContext dynamically.
+             The Create* items are only meaningful for a group node (a root node is one) - for an asset node
+             row, whose actual DataContext at runtime is some other ProjectNodeViewModel subtype, each
+             binding below safely evaluates to null (disabling that item) rather than throwing, since
+             compiled bindings null-check every step of a member-access chain. Rename/Delete instead route
+             through the tab view model (see the $parent[UserControl] lookup on the VariantMenu below for the
+             same pattern), since they need tab-level state a lone node doesn't have. x:Shared is False so
+             each {StaticResource} reference below gets its own ContextMenu instance, rather than one
+             instance fighting over ownership between every row that references it. -->
+        <ContextMenu x:Key="CreateChildMenu" x:Shared="False">
+            <MenuItem Header="Create Group" x:DataType="vm:GroupNodeViewModel" Command="{Binding CreateGroupCommand}" />
+            <MenuItem Header="Create Text" x:DataType="vm:GroupNodeViewModel" Command="{Binding CreateTextCommand}" />
+            <MenuItem Header="Create Image" x:DataType="vm:GroupNodeViewModel" Command="{Binding CreateImageCommand}" />
+            <MenuItem Header="Create Mesh" x:DataType="vm:GroupNodeViewModel" Command="{Binding CreateMeshCommand}" />
+            <Separator />
+            <!-- Disabled for the root node (its Parent always stays null) - it can be neither renamed nor deleted. -->
+            <MenuItem Header="Rename" x:DataType="vm:ProjectNodeViewModel" IsEnabled="{Binding Parent, Converter={x:Static conv:ObjectConverters.IsNotNull}}"
+                      Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RenameNodeCommand}" CommandParameter="{Binding}" />
+            <MenuItem Header="Delete" x:DataType="vm:ProjectNodeViewModel" IsEnabled="{Binding Parent, Converter={x:Static conv:ObjectConverters.IsNotNull}}"
+                      Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).DeleteNodeCommand}" CommandParameter="{Binding}" />
+        </ContextMenu>
+
+        <!-- Right-click menu for a variant entry, shared by every asset kind. RegenerateMesh/ApproveConcept
+             only make sense for a MeshVariantViewModel - for any other variant kind, x:DataType there means
+             the CommandParameter binding below safely evaluates to null, so those items just never fire
+             (they're still shown; XAML alone can't know a variant's runtime kind to hide them, and showing a
+             harmless no-op item is preferable to a second, near-duplicate menu resource per asset kind). -->
+        <ContextMenu x:Key="VariantMenu" x:Shared="False">
+            <MenuItem Header="Rename" Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RenameVariantCommand}" CommandParameter="{Binding}" />
+            <MenuItem Header="Regenerate" Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RegenerateVariantCommand}" CommandParameter="{Binding}" />
+            <MenuItem Header="Regenerate Mesh" x:DataType="vm:MeshVariantViewModel"
+                      Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RegenerateMeshOnlyCommand}" CommandParameter="{Binding}" />
+            <MenuItem Header="Approve" x:DataType="vm:MeshVariantViewModel" IsVisible="{Binding Status, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter={x:Static models:VariantStatus.AwaitingApproval}}"
+                      Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).ApproveConceptCommand}" CommandParameter="{Binding}" />
+            <Separator />
+            <MenuItem Header="Delete" Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).DeleteVariantCommand}" CommandParameter="{Binding}" />
+        </ContextMenu>
+    
+        <!-- Context editor shared by every asset node kind (a group node inlines its own copy above, since
+             it has no output path/variants below it to share a template host with). A node's name is edited
+             via the sidebar tree's right-click "Rename", not here. -->
+        <DataTemplate x:Key="ContextSection" DataType="vm:AssetNodeViewModel">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Context" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                           Text="Used, together with everything gathered from this node's parent chain and links, when generating this asset's variants." />
+                <TextBox Text="{Binding Context, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap"
+                         Height="100" VerticalContentAlignment="Top" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Generation model override, shared by the (non-root) group node content area and the image/model
+             asset node content areas (a text node always generates locally via the Claude Code CLI, so it
+             has no use for this). Leaving ScenarioModelId blank inherits the nearest ancestor's own setting
+             - see ProjectNodeViewModel.ResolveScenarioModelId. The root node has no ancestor to inherit from,
+             so it gets its own RootScenarioModelSection variant below instead, with no inherit option. -->
+        <DataTemplate x:Key="ScenarioModelSection" DataType="vm:ProjectNodeViewModel">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Image Generation Model" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                              ItemsSource="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).AvailableScenarioModels}"
+                              SelectedValue="{Binding ScenarioModelId, Mode=TwoWay}" SelectedValueBinding="{Binding Id}"
+                              IsEnabled="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).IsLoadingScenarioModels, Converter={x:Static conv:BoolConverters.Not}}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="models:ScenarioModel">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button Grid.Column="1" Margin="6,0,0,0" Content="Auto" ToolTip.Tip="Ask Claude to pick the best model for this node's context"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).PickScenarioModelCommand}" CommandParameter="{Binding}" />
+                    <Button Grid.Column="2" Margin="6,0,0,0" Content="Refresh"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RefreshScenarioModelsCommand}" />
+                </Grid>
+                <TextBlock Text="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).ScenarioModelLoadError}" TextWrapping="Wrap" FontSize="11"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           IsVisible="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).ScenarioModelLoadError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Root-only variant of ScenarioModelSection above: the root has no ancestor to inherit a
+             generation model from, so its picker offers no inherit option (RootScenarioModelOptions, unlike
+             AvailableScenarioModels, never includes that sentinel) and ProjectTabViewModel auto-assigns it
+             the first available model as soon as one loads and it has none set yet. -->
+        <DataTemplate x:Key="RootScenarioModelSection" DataType="vm:RootNodeViewModel">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Image Generation Model" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                              ItemsSource="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RootScenarioModelOptions}"
+                              SelectedValue="{Binding ScenarioModelId, Mode=TwoWay}" SelectedValueBinding="{Binding Id}"
+                              IsEnabled="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).IsLoadingScenarioModels, Converter={x:Static conv:BoolConverters.Not}}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="models:ScenarioModel">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button Grid.Column="1" Margin="6,0,0,0" Content="Auto" ToolTip.Tip="Ask Claude to pick the best model for this node's context"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).PickScenarioModelCommand}" CommandParameter="{Binding}" />
+                    <Button Grid.Column="2" Margin="6,0,0,0" Content="Refresh"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).RefreshScenarioModelsCommand}" />
+                </Grid>
+                <TextBlock Text="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).ScenarioModelLoadError}" TextWrapping="Wrap" FontSize="11"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           IsVisible="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).ScenarioModelLoadError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Reference files list, shared by group and asset node content areas alike. -->
+        <DataTemplate x:Key="ReferenceFilesSection" DataType="vm:ProjectNodeViewModel">
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Grid.Column="0" Text="Reference Files" FontSize="11" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+                    <Button Grid.Column="1" Content="Upload File..." Margin="0,0,6,0"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).UploadReferenceFileCommand}" />
+                    <Button Grid.Column="2" Content="Link Project File..."
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).LinkReferenceFileCommand}" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding ReferenceFiles}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ReferenceFileViewModel">
+                            <Border Padding="8" Margin="0,0,0,4" CornerRadius="4"
+                                    Background="{DynamicResource SideBarBackgroundBrush}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <Image Grid.Column="0" Width="40" Height="40" Margin="0,0,8,0" Stretch="UniformToFill"
+                                           IsVisible="{Binding IsImage}"
+                                           Source="{Binding AbsolutePath, Converter={StaticResource FilePathToBitmapConverter}}" />
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBox Text="{Binding Name, Mode=TwoWay}" FontSize="12" />
+                                        <TextBlock Text="{Binding RelativePath}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Classes="iconButton" ToolTip.Tip="Remove"
+                                            Command="{Binding $parent[ItemsControl].((vm:ProjectNodeViewModel)DataContext).RemoveReferenceFileCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="9" Height="9" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Cross-hierarchy node links, shared by group and asset node content areas alike. -->
+        <DataTemplate x:Key="LinksSection" DataType="vm:ProjectNodeViewModel">
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Linked Nodes" FontSize="11" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+                    <Button Grid.Column="1" Content="Add Link..."
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).AddLinkCommand}" />
+                </Grid>
+                <TextBlock Text="No linked nodes." FontSize="11" Foreground="{DynamicResource TextMutedBrush}" IsVisible="{Binding !Links.Count}" />
+                <ItemsControl ItemsSource="{Binding Links}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ProjectNodeViewModel">
+                            <Border Padding="8" Margin="0,0,0,4" CornerRadius="4"
+                                    Background="{DynamicResource SideBarBackgroundBrush}">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <Path Grid.Column="0" Classes="lineIcon" Data="{StaticResource LinkIconGeometry}" Width="12" Height="12" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <Button Grid.Column="2" Classes="iconButton" ToolTip.Tip="Remove Link"
+                                            Command="{Binding $parent[ItemsControl].((vm:ProjectNodeViewModel)DataContext).RemoveLinkCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="9" Height="9" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Output path selector, shared by every asset node kind. -->
+        <DataTemplate x:Key="OutputPathSection" DataType="vm:AssetNodeViewModel">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Output Path" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                           Text="Project-relative folder generated asset variants are written into. Defaults to a 'Generated' folder if left blank." />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding OutputPath, Mode=TwoWay}" Margin="0,0,6,0" />
+                    <Button Grid.Column="1" Content="Browse..."
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).PickOutputPathCommand}" />
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Variant generation controls, shared by every asset node kind. -->
+        <DataTemplate x:Key="GenerateSection" DataType="vm:AssetNodeViewModel">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Generate" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <Grid ColumnDefinitions="Auto,Auto">
+                    <NumericUpDown Grid.Column="0" Width="120" Minimum="1" FormatString="0" Value="{Binding GenerateCount, Mode=TwoWay}" Margin="0,0,8,0" />
+                    <Button Grid.Column="1" Content="Generate Variants" Classes="accent"
+                            Command="{Binding $parent[UserControl].((vm:ProjectTabViewModel)DataContext).GenerateVariantsCommand}" />
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Generated variant list, shared by every asset node kind - collapsed entries expand to show
+             kind-specific detail (via the implicit, exact-type-matched DataTemplates declared below in
+             UserControl.DataTemplates - deliberately not one shared, manually-type-switched template: a
+             binding whose path does not exist on an item's actual runtime type silently leaves its target
+             property at that property's own default rather than erroring, which for IsVisible defaults to
+             true, so a single shared template would show every kind's detail on every variant regardless of
+             its real kind), and every entry offers the shared VariantMenu on right-click. -->
+        <DataTemplate x:Key="VariantsSection" DataType="vm:AssetNodeViewModel">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Variants" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock Text="No variants generated yet." FontSize="11" Foreground="{DynamicResource TextMutedBrush}" IsVisible="{Binding !Variants.Count}" />
+                <ItemsControl ItemsSource="{Binding Variants}" />
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <!-- Content-area editors for a selected node, chosen automatically by Avalonia based on the selected
+         node's runtime type, matched in declaration order below - a RootNodeViewModel gets its own editor
+         (declared first, since it is also a GroupNodeViewModel and so would otherwise match that one
+         instead), every other GroupNodeViewModel gets the plain group editor, and Text/Image/Mesh each get
+         their own editor (sharing the same context/reference file/link/output-path/variant markup, since
+         implicit DataTemplate lookup cannot layer a common template under a kind-specific one). -->
+    <UserControl.DataTemplates>
+        <DataTemplate DataType="vm:RootNodeViewModel">
+            <ScrollViewer>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch" Margin="0,0,20,20">
+                    <TextBlock Text="Project" FontSize="18" FontWeight="Bold" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Context" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                                   Text="The concept this project represents, used when generating assets nested under it. Reference files below can be cited here by name." />
+                        <TextBox Text="{Binding Context, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap"
+                                 Height="140" VerticalContentAlignment="Top" />
+                    </StackPanel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource RootScenarioModelSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ReferenceFilesSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource LinksSection}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:GroupNodeViewModel">
+            <ScrollViewer>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch" Margin="0,0,20,20">
+                    <TextBlock Text="Group" FontSize="18" FontWeight="Bold" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Context" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                                   Text="The concept this group represents, used when generating assets nested under it. Reference files below can be cited here by name." />
+                        <TextBox Text="{Binding Context, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap"
+                                 Height="140" VerticalContentAlignment="Top" />
+                    </StackPanel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ScenarioModelSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ReferenceFilesSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource LinksSection}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:TextNodeViewModel">
+            <ScrollViewer>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch" Margin="0,0,20,20">
+                    <TextBlock Text="Text" FontSize="18" FontWeight="Bold" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ContextSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ReferenceFilesSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource LinksSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OutputPathSection}" />
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Text Settings" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Unit" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Minimum" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Maximum" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                            <ComboBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding AvailableUnits}" SelectedItem="{Binding Unit, Mode=TwoWay}" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="1" Width="110" Minimum="1" Value="{Binding MinUnits, Mode=TwoWay}" FormatString="0" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="2" Width="110" Minimum="1" Value="{Binding MaxUnits, Mode=TwoWay}" FormatString="0" />
+                        </Grid>
+                        <CheckBox Content="Format output as JSON" IsChecked="{Binding IsJsonFormatted, Mode=TwoWay}" />
+                        <StackPanel Spacing="4" IsVisible="{Binding IsJsonFormatted}">
+                            <TextBlock Text="JSON Schema" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                            <TextBox Text="{Binding JsonSchema, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap"
+                                     FontFamily="Consolas,monospace" Height="120" VerticalContentAlignment="Top" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource GenerateSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VariantsSection}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:ImageNodeViewModel">
+            <ScrollViewer>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch" Margin="0,0,20,20">
+                    <TextBlock Text="Image" FontSize="18" FontWeight="Bold" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ContextSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ScenarioModelSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ReferenceFilesSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource LinksSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OutputPathSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource GenerateSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VariantsSection}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:MeshNodeViewModel">
+            <ScrollViewer>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch" Margin="0,0,20,20">
+                    <TextBlock Text="Mesh" FontSize="18" FontWeight="Bold" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ContextSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ScenarioModelSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ReferenceFilesSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource LinksSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource OutputPathSection}" />
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Mesh Settings" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                        <CheckBox Content="Require concept approval before generating the mesh" IsChecked="{Binding RequireConceptApproval, Mode=TwoWay}" />
+                    </StackPanel>
+
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource GenerateSection}" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VariantsSection}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <!-- One variant entry, matched to its own exact runtime type by Avalonia's normal implicit
+             DataTemplate resolution (see the comment on VariantsSection above for why that matters here). -->
+        <DataTemplate DataType="vm:TextVariantViewModel">
+            <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,4" ContextMenu="{StaticResource VariantMenu}">
+                <Expander.Header>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12.5" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                    </Grid>
+                </Expander.Header>
+                <StackPanel Spacing="4" Margin="4,6,4,2">
+                    <TextBlock Text="{Binding ErrorMessage}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource DangerBrush}" IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock Text="{Binding OutputFilePath, StringFormat='Output: {0}'}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                               IsVisible="{Binding OutputFilePath, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+            </Expander>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:ImageVariantViewModel">
+            <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,4" ContextMenu="{StaticResource VariantMenu}">
+                <Expander.Header>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12.5" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                    </Grid>
+                </Expander.Header>
+                <StackPanel Spacing="4" Margin="4,6,4,2">
+                    <TextBlock Text="{Binding ErrorMessage}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource DangerBrush}" IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <Image Width="160" Height="160" HorizontalAlignment="Left" Stretch="Uniform"
+                           IsVisible="{Binding OutputFilePath, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                           Source="{Binding OutputFilePath, Converter={StaticResource FilePathToBitmapConverter}}" />
+                </StackPanel>
+            </Expander>
+        </DataTemplate>
+
+        <DataTemplate DataType="vm:MeshVariantViewModel">
+            <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,4" ContextMenu="{StaticResource VariantMenu}">
+                <Expander.Header>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12.5" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                    </Grid>
+                </Expander.Header>
+                <StackPanel Spacing="4" Margin="4,6,4,2">
+                    <TextBlock Text="{Binding ErrorMessage}" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource DangerBrush}" IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock Text="Concept" FontSize="10" Foreground="{DynamicResource TextMutedBrush}"
+                               IsVisible="{Binding AbsoluteConceptImagePath, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <Image Width="120" Height="120" HorizontalAlignment="Left" Stretch="Uniform"
+                           IsVisible="{Binding AbsoluteConceptImagePath, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                           Source="{Binding AbsoluteConceptImagePath, Converter={StaticResource FilePathToBitmapConverter}}" />
+                    <TextBlock Text="{Binding OutputFilePath, StringFormat='Mesh output: {0}'}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                               IsVisible="{Binding OutputFilePath, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+            </Expander>
+        </DataTemplate>
+    </UserControl.DataTemplates>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="{Binding SidebarWidth, Mode=TwoWay}" MinWidth="180" />
+            <ColumnDefinition Width="4" />
+            <ColumnDefinition Width="*" MinWidth="320" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Node sidebar: one recursive TreeView rooted at RootNodeItems (a single-item list holding just
+             RootNode), so the root node itself is an ordinary, selectable row at the top of the tree rather
+             than a separate element outside it. -->
+        <Border Grid.Column="0" Background="{DynamicResource SideBarBackgroundBrush}">
+            <TreeView Margin="4" ItemsSource="{Binding RootNodeItems}" SelectedItem="{Binding SelectedNode, Mode=TwoWay}">
+                <TreeView.Styles>
+                    <Style Selector="TreeViewItem" x:DataType="vm:ProjectNodeViewModel">
+                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                    </Style>
+                </TreeView.Styles>
+                <TreeView.ItemTemplate>
+                    <TreeDataTemplate DataType="vm:ProjectNodeViewModel" ItemsSource="{Binding Children}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2" ContextMenu="{StaticResource CreateChildMenu}">
+                            <Path Classes="lineIcon" Data="{Binding Converter={StaticResource ProjectNodeIconConverter}}" Width="12" Height="12" />
+                            <TextBlock Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </Border>
+
+        <GridSplitter Grid.Column="1" Width="4" Background="Transparent" HorizontalAlignment="Stretch"
+                      ResizeDirection="Columns" Cursor="SizeWestEast" />
+        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1,0,0,0" IsHitTestVisible="False" />
+
+        <!-- Content area: which editor is shown is resolved automatically from the selected node's runtime
+             type, via the implicit DataTemplates declared above in UserControl.DataTemplates. -->
+        <ContentControl Grid.Column="2" Margin="20" Content="{Binding SelectedNode}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+    </Grid>
+</UserControl>

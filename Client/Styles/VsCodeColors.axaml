@@ -1,0 +1,19 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#1E1E1E" />
+    <SolidColorBrush x:Key="SideBarBackgroundBrush" Color="#252526" />
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#2D2D2D" />
+    <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#1E1E1E" />
+    <SolidColorBrush x:Key="TabInactiveBackgroundBrush" Color="#2D2D2D" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#007ACC" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1F8AD2" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#CCCCCC" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#969696" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#3C3C3C" />
+    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#2A2D2E" />
+    <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#094771" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C74E39" />
+
+    <!-- FluentTheme expects this specific key as a Color (not a Brush) - drives its accent-derived palette. -->
+    <Color x:Key="SystemAccentColor">#007ACC</Color>
+</ResourceDictionary>
